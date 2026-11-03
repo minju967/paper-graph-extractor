@@ -1,0 +1,29 @@
+[project]
+name = "paper-extractor"
+version = "0.1.0"
+description = "LLM 기반 논문 정보 추출 시스템 (개발계획서 v0.1 구현)"
+requires-python = ">=3.11"
+dependencies = [
+    # 변환 결과가 버전에 따라 달라지므로 고정한다. (개발계획서 준비 A)
+    "pymupdf4llm==1.27.2.3",
+    "openai>=1.60",
+    "pydantic>=2.7",
+    "tiktoken>=0.7",
+]
+
+[project.optional-dependencies]
+neo4j = ["neo4j>=5.20"]
+dev = ["pytest>=8"]
+
+[project.scripts]
+paper-extractor = "paper_extractor.cli:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["paper_extractor"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

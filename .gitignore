@@ -1,0 +1,15 @@
+# 비밀값
+.env
+
+# 가상환경·캐시
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+*.egg-info/
+.DS_Store
+
+# 원본 논문 PDF(저작권 자료)와 생성 산출물
+paper_extractor/papers/
+outputs/
+outputs_backup_*/
