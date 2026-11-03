@@ -13,3 +13,7 @@ __pycache__/
 paper_extractor/papers/
 outputs/
 outputs_backup_*/
+
+# 테스트 코드   
+paper_extractor/tests/
+

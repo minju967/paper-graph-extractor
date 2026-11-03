@@ -108,6 +108,8 @@ class _Block:
 
 _FLOAT_CLASSES = {"caption", "table"}
 _SMALL_FONT_GAP = 1.2  # 본문 글자 크기보다 이만큼(pt) 이상 작으면 각주·주석으로 본다
+_FOOTER_SMALL_GAP = 0.3  # 쪽 아래쪽에서는 이만큼만 작아도 각주로 본다
+_FOOTER_ZONE = 0.75  # 쪽 높이의 이 비율보다 아래를 각주 영역으로 본다
 _NOTE_GAP = 14  # 표 바로 밑으로 보는 최대 세로 간격(pt)
 _NOTE_RE = re.compile(r"^\s*[_*]*(?:M|SD|Note|Notes|주|비고|Abbreviations?)[_*]*\s*[:.]|^\s*[*†‡§]", re.IGNORECASE)
 
@@ -146,6 +148,25 @@ def _is_continuation(prev: _Block, cur: _Block, require_cross: bool = True) -> b
     if not require_cross:
         return True
     return cur.page != prev.page or (prev.x0 is not None and cur.x0 is not None and abs(cur.x0 - prev.x0) > _COLUMN_GAP)
+
+
+_CAPTION_WINDOW = 15  # 표 앞에서 떨어진 캡션을 찾는 최대 블록 수
+_TABLE_CAPTION_RE = re.compile(r"^[\s*]*(?:Table|표)\s*\d+", re.IGNORECASE)
+
+
+def _reattach_captions(out: list[_Block]) -> None:
+    """읽기 순서 재정렬로 표 캡션이 표에서 떨어진 경우(캡션은 왼쪽 단, 표는 단을 가로지름), 캡션을 표 바로 앞으로 옮긴다."""
+    idx = 0
+    while idx < len(out):
+        b = out[idx]
+        if b.kind == "table" and not (idx > 0 and out[idx - 1].cls == "caption"):
+            for j in range(idx - 1, max(-1, idx - 1 - _CAPTION_WINDOW), -1):  # 이어 붙인 문단의 쪽 번호가 바뀔 수 있어 쪽 대신 블록 거리로 제한한다
+                c = out[j]
+                owned = j + 1 < len(out) and out[j + 1].kind == "table"  # 이미 자기 표가 붙어 있는 캡션은 건드리지 않는다
+                if c.cls == "caption" and _TABLE_CAPTION_RE.match(c.body) and not owned:
+                    out.insert(idx - 1, out.pop(j))
+                    break
+        idx += 1
 
 
 def _last_text_index(out: list[_Block]) -> int | None:
@@ -206,7 +227,7 @@ def convert(pdf_path: Path) -> tuple[str, dict]:
     pages = pymupdf4llm.to_markdown(str(pdf_path), page_chunks=True)
     out: list[_Block] = []
     meta = _Meta()
-    page_items: list[list[tuple]] = []  # 쪽별 (kind, body, level, box, 글자 크기)
+    page_items: list[tuple[float, list[tuple]]] = []  # 쪽별 (쪽 높이, [(kind, body, level, box, 글자 크기)])
     body_sizes: collections.Counter = collections.Counter()
     with pymupdf.open(str(pdf_path)) as doc:
         pdf_metadata = dict(doc.metadata or {})
@@ -229,25 +250,32 @@ def convert(pdf_path: Path) -> tuple[str, dict]:
                 if box and box.get("class") == "text" and size:
                     body_sizes[round(size * 2) / 2] += len(body)  # 본문 글자 크기 = 글자 수 가중 최빈값
                 items.append((kind, body, level, box, size))
-            page_items.append(items)
+            page_items.append((doc[i].rect.height, items))
     body_size = body_sizes.most_common(1)[0][0] if body_sizes else None
 
-    for i, items in enumerate(page_items):
+    for i, (page_h, items) in enumerate(page_items):
         for kind, body, level, box, size in items:
             cls = box.get("class") if box else None
             if _PLACEHOLDER_RE.match(body):
                 continue  # 복원되지 못한 그림 자리표시자
             if cls == "picture" and "Start of picture text" in body:
                 continue  # 그림 안 글자(흐름도 등): 이미지로 따로 전달되고, 글자는 뒤섞여 본문 문장 사이에 끼어든다
-            if cls in _DROP_CLASSES or (cls == "footnote" and _LICENSE_RE.search(body)):
-                meta.add(cls, body, i + 1)  # 머리글·바닥글, 라이선스 각주
+            if cls in _DROP_CLASSES:
+                meta.add(cls, body, i + 1)  # 머리글·바닥글
+                continue
+            if _LICENSE_RE.search(body) and len(body) < 800:
+                meta.add("footnote", body, i + 1)  # 라이선스 문구(레이아웃 분류와 무관)
                 continue
             if kind == "heading" and _looks_like_sentence(body):
                 kind, level, cls = "paragraph", None, "text"  # 문장 조각은 본문 문단으로 되돌린다
             bbox = box["bbox"] if box and box.get("bbox") else None
             blk = _Block(kind, body, level, cls, i + 1, bbox[0] if bbox else None, bbox[1] if bbox else None, bbox[3] if bbox else None)
-            if cls == "text" and size and body_size and size <= body_size - _SMALL_FONT_GAP:
-                blk.small = True
+            if cls in ("text", "section-header") and size and body_size and bbox:
+                low = bbox[1] > page_h * _FOOTER_ZONE
+                if size <= body_size - _SMALL_FONT_GAP or (low and size < body_size - _FOOTER_SMALL_GAP):
+                    blk.small = True
+                    if blk.kind == "heading":  # 쪽 아래 각주 줄(`*Corresponding author` 등)이 제목으로 분류된 경우
+                        blk.kind, blk.level, blk.cls = "paragraph", None, "text"
             if cls == "text" and out and out[-1].kind == "table":
                 near = out[-1].y1 is not None and blk.y0 is not None and 0 <= blk.y0 - out[-1].y1 <= _NOTE_GAP
                 if near or _NOTE_RE.match(body):
@@ -264,6 +292,7 @@ def convert(pdf_path: Path) -> tuple[str, dict]:
                 target.page, target.x0, target.y1 = blk.page, blk.x0, blk.y1
             else:
                 out.append(blk)
+    _reattach_captions(out)
     parts = [("#" * (b.level or 2) + " " + b.body) if b.kind == "heading" else b.body for b in out]
     all_text = "\n".join(pg.get("text", "") or "" for pg in pages)
     text, repairs = repair_symbols("\n\n".join(parts))

@@ -467,28 +467,86 @@ def process(path: Path, cfg: Config, out_dir: Path, dry_run: bool) -> bool:
     for msg in warnings + notes:
         print(f"  {msg}")
 
+    data = {
+        "source": path.name,
+        "model": cfg.model,
+        "chunks": [{"index": c.index, "start": c.start, "end": c.end, "tokens": c.tokens} for c in chunks],
+        "usage": budget_tracker.totals(),
+        "warnings": warnings,
+        "checks": notes,
+        "outline": outline,
+    }
+    save_result(path, out_dir, data, outline_md)
+    return True
+
+
+def save_result(path: Path, out_dir: Path, data: dict, outline_md: str) -> None:
     out_dir.mkdir(parents=True, exist_ok=True)
     out_path = out_dir / f"{output_stem(path)}.json"
-    out_path.write_text(
-        json.dumps(
-            {
-                "source": path.name,
-                "model": cfg.model,
-                "chunks": [{"index": c.index, "start": c.start, "end": c.end, "tokens": c.tokens} for c in chunks],
-                "usage": budget_tracker.totals(),
-                "warnings": warnings,
-                "checks": notes,
-                "outline": outline,
-            },
-            ensure_ascii=False,
-            indent=2,
-        ),
-        encoding="utf-8",
-    )
+    out_path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
     md_path = out_dir / f"{output_stem(path)}.outline.md"
     md_path.write_text(outline_md + "\n", encoding="utf-8")
     print(f"  -> {out_path}\n  -> {md_path}")
-    return True
+
+
+# --- 확정한 제목 구조를 새 Markdown에 다시 붙이기 (LLM 호출 없음) -----------------
+
+_MAX_NUMBERING = 10  # 제목 줄에 붙은 번호(`1.`, `Ⅰ.` 등)로 허용하는 추가 글자 수
+
+
+def _flat_headings(outline: list[dict]) -> list[dict]:
+    out: list[dict] = []
+
+    def walk(nodes: list[dict]) -> None:
+        for n in nodes:
+            if n["level"] > 0:  # 레벨 0은 `(제목 이전 본문)` 같은 가짜 노드
+                out.append(n)
+            walk(n["children"])
+
+    walk(outline)
+    return sorted(out, key=lambda n: n["line"])
+
+
+def _heading_texts(lines: list[str]) -> set[str]:
+    return {_norm(l.lstrip().lstrip("#")) for l in lines if l.lstrip().startswith("#")}
+
+
+def reanchor(old_data: dict, old_md: str, new_lines: list[str]) -> tuple[list[Heading] | None, str]:
+    """이전에 확정한 제목 목록(레벨·제목·순서)을 변경된 Markdown의 줄에 다시 붙인다.
+
+    변환 수정이 제목 자체를 바꾸지 않았을 때만 성공한다. 이전 제목을 하나라도 못 찾거나, 이전에 없던 `#` 제목 후보가
+    새로 생겼으면 None과 사유를 돌려준다(그 경우는 LLM으로 다시 추출해야 한다).
+    """
+    new_candidates = _heading_texts(new_lines) - _heading_texts(old_md.splitlines())
+    if new_candidates:
+        return None, f"새 제목 후보 {len(new_candidates)}개: {sorted(new_candidates)[:3]}"
+    norms = [_norm(l.lstrip().lstrip("#")) for l in new_lines]
+    is_hash = [l.lstrip().startswith("#") for l in new_lines]
+    found: list[Heading] = []
+    pos = 0  # 직전에 맞춘 줄(0-based)의 다음부터 찾는다
+    for h in _flat_headings(old_data["outline"]):
+        title_n = _norm(h["title"])
+        hit = None
+        if h.get("inferred"):
+            first = next((l for l in h["body"].splitlines() if l.strip()), "")
+            key = _norm(first)[:25]
+            hit = next((i for i in range(pos, len(new_lines)) if key and norms[i].startswith(key)), None)
+        else:
+            hit = next(
+                (
+                    i
+                    for i in range(pos, len(new_lines))
+                    if title_n
+                    and len(norms[i]) <= len(title_n) + _MAX_NUMBERING
+                    and (title_n in norms[i] if is_hash[i] else norms[i].endswith(title_n))  # `#` 없는 줄은 앞에 번호만 붙은 짧은 줄만 인정
+                ),
+                None,
+            )
+        if hit is None:
+            return None, f"이전 제목을 찾지 못함: '{h['title'][:30]}'"
+        found.append(Heading(line=hit + 1, level=h["level"], title=h["title"], inferred=bool(h.get("inferred"))))
+        pos = hit + 1
+    return found, f"제목 {len(found)}개 모두 재부착"
 
 
 def main(argv: list[str] | None = None) -> int:
