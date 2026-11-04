@@ -12,6 +12,7 @@ import json
 from pathlib import Path
 
 from ..config import Config
+from ..evidence_refs import resolve
 from ..extract_title import load_env
 from ..llm import BudgetedLLM, CallBudget, OpenAIClient
 from ..routing_call import cached_routing
@@ -39,17 +40,6 @@ def apply_single_doi(out: PaperOut, dois: list[str], ref_map: dict[str, dict]) -
         out.doi.value = dois[0]
         out.doi.evidence = [r for r, v in ref_map.items() if dois[0] in v["text"]][:1]
         out.doi.note = "정규식 단일 후보, 코드 채택"
-
-
-def resolve(attr, ref_map: dict[str, dict]) -> tuple[list[dict], list[str]]:
-    """근거 문장 번호를 원문 문장과 섹션 경로로 바꾼다. (근거 목록, 입력에 없는 번호 목록)을 돌려준다."""
-    evidence, invalid = [], []
-    for ref in dict.fromkeys(attr.evidence):  # 중복 제거, 순서 유지
-        if ref in ref_map:
-            evidence.append({"ref": ref, "section": ref_map[ref]["section"], "quote": ref_map[ref]["text"]})
-        else:
-            invalid.append(ref)
-    return evidence, invalid
 
 
 def show(out: PaperOut, ref_map: dict[str, dict]) -> None:

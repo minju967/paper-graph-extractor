@@ -8,6 +8,8 @@ from __future__ import annotations
 
 from pydantic import BaseModel
 
+from ..attrs import NumAttr, TextAttr
+
 SYSTEM_PROMPT = """\
 You are given parts of ONE academic paper (one or more text chunks). Extract the attributes of the paper itself
 (the "Paper" node). Extract only about the CURRENT paper, never about papers it cites.
@@ -51,18 +53,6 @@ Attributes (required: title, authors, year, journal, study_type):
     A decade range such as "40~50대" -> min 40, max 59; a single decade such as "60대" or "60세 전후" -> 60 to 69.
     Early / middle / late within a decade: early n0-n2, middle n3-n6, late n7-n9 (e.g. "60대 중반" -> 63 to 66).
 """
-
-
-class TextAttr(BaseModel):
-    value: str | None
-    evidence: list[str]  # 근거 문장 번호(예: h4.s1)
-    note: str | None
-
-
-class NumAttr(BaseModel):
-    value: int | None
-    evidence: list[str]  # 근거 문장 번호(예: h4.s1)
-    note: str | None
 
 
 class PaperOut(BaseModel):

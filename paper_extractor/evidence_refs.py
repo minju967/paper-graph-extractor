@@ -77,6 +77,29 @@ def number_chunk(chunk: dict) -> tuple[str, dict[str, dict]]:
     out.append(text[cursor:])
     return "".join(out), ref_map
 
+def number_chunks(selected: list[dict]) -> tuple[str, dict[str, dict]]:
+    """여러 청크에 문장 번호를 붙여 `[청크 N]` 머리말과 함께 이어 붙인다. (텍스트, 합친 ref_map)을 돌려준다."""
+    parts, ref_map = [], {}
+    for c in selected:
+        numbered, refs = number_chunk(c)
+        dup = ref_map.keys() & refs.keys()
+        if dup:
+            raise ValueError(f"문장 번호가 청크 사이에서 겹친다: {sorted(dup)[:3]}")
+        ref_map.update(refs)
+        parts.append(f"[청크 {c['index']}]\n{numbered}")
+    return "\n\n".join(parts), ref_map
+
+
+def resolve(attr, ref_map: dict[str, dict]) -> tuple[list[dict], list[str]]:
+    """근거 문장 번호를 원문 문장과 섹션 경로로 바꾼다. (근거 목록, 입력에 없는 번호 목록)을 돌려준다."""
+    evidence, invalid = [], []
+    for ref in dict.fromkeys(attr.evidence):  # 중복 제거, 순서 유지
+        if ref in ref_map:
+            evidence.append({"ref": ref, "section": ref_map[ref]["section"], "quote": ref_map[ref]["text"]})
+        else:
+            invalid.append(ref)
+    return evidence, invalid
+
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="청크에 문장 번호를 붙여 출력합니다(LLM 호출 없음).")
