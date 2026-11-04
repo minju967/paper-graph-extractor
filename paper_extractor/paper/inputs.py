@@ -12,35 +12,15 @@ import json
 import re
 from pathlib import Path
 
-from .config import Config
-from .evidence_refs import number_chunk
-from .extract_title import load_env
-from .llm import BudgetedLLM, CallBudget
-from .routing_input import format_list, section_list
-from .routing_prompt import SYSTEM_PROMPT as ROUTING_PROMPT
-from .routing_prompt import RoutingOut
+from ..config import Config
+from ..evidence_refs import number_chunk
+from ..extract_title import load_env
+from ..routing_call import cached_routing
+from ..routing_input import section_list
+from ..routing_prompt import RoutingOut
 
 META_SECTION = "(메타데이터: 머리글·바닥글)"
 DOI_RE = re.compile(r"10\.\d{4,9}/[^\s\"<>\]\)]+")
-
-
-class _NoCall:
-    """캐시에 없으면 호출 대신 멈추기 위한 자리 표시 클라이언트(예산 0이라 호출되지 않는다)."""
-
-    def parse(self, **_):
-        raise RuntimeError("호출하지 않는다")
-
-
-def cached_routing(rows: list[dict], cfg: Config, cache_dir: Path) -> RoutingOut:
-    """라우팅 결과를 캐시에서만 읽는다. 캐시에 없으면 BudgetExceeded가 난다(API 호출 없음)."""
-    llm = BudgetedLLM(_NoCall(), CallBudget(0), cache_dir, cfg.cache_fingerprint(), cfg.model)
-    return llm.run(
-        stage="routing",
-        system=ROUTING_PROMPT,
-        user=format_list(rows),
-        schema=RoutingOut,
-        max_output_tokens=cfg.max_output_tokens_classify,
-    )
 
 
 def paper_chunk_indexes(route: RoutingOut, rows: list[dict]) -> list[int]:
@@ -104,7 +84,7 @@ def build_user(selected: list[dict], dois: list[str], meta: dict | None = None) 
 
 
 def main() -> None:
-    root = Path(__file__).resolve().parent.parent
+    root = Path(__file__).resolve().parent.parent.parent
     parser = argparse.ArgumentParser(description="Paper 호출 입력을 만들어 확인합니다(LLM 호출 없음).")
     parser.add_argument("chunks_json", type=Path)
     parser.add_argument("--full", action="store_true", help="보낼 입력 전문을 출력")

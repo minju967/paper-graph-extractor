@@ -18,6 +18,25 @@ from .routing_prompt import SYSTEM_PROMPT, RoutingOut
 NODES = ["paper", "population", "program", "outcome"]
 
 
+class _NoCall:
+    """캐시에 없으면 호출 대신 멈추기 위한 자리 표시 클라이언트(예산 0이라 호출되지 않는다)."""
+
+    def parse(self, **_):
+        raise RuntimeError("호출하지 않는다")
+
+
+def cached_routing(rows: list[dict], cfg: Config, cache_dir: Path) -> RoutingOut:
+    """라우팅 결과를 캐시에서만 읽는다. 캐시에 없으면 BudgetExceeded가 난다(API 호출 없음)."""
+    llm = BudgetedLLM(_NoCall(), CallBudget(0), cache_dir, cfg.cache_fingerprint(), cfg.model)
+    return llm.run(
+        stage="routing",
+        system=SYSTEM_PROMPT,
+        user=format_list(rows),
+        schema=RoutingOut,
+        max_output_tokens=cfg.max_output_tokens_classify,
+    )
+
+
 def route(rows: list[dict], cfg: Config, cache_dir: Path) -> tuple[RoutingOut, dict]:
     """섹션 목록으로 라우팅을 1회 호출한다. (출력, 사용량 요약)을 돌려준다."""
     llm = BudgetedLLM(OpenAIClient(cfg.model, cfg.request_timeout_s), CallBudget(1), cache_dir, cfg.cache_fingerprint(), cfg.model)

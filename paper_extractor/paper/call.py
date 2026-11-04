@@ -1,4 +1,4 @@
-"""Paper 호출: 입력(`paper_input`)을 LLM에 1회 보내 Paper 속성값을 받고 출력한다.
+"""Paper 호출: 입력(`inputs.py`)을 LLM에 1회 보내 Paper 속성값을 받고 출력한다.
 
 논문 한 편당 LLM을 1회 호출한다. 같은 입력은 캐시를 써서 다시 호출하지 않는다.
 DOI 후보가 하나면 코드가 그 값을 채택해 LLM 값을 덮어쓴다(v1.07).
@@ -11,12 +11,13 @@ import argparse
 import json
 from pathlib import Path
 
-from .config import Config
-from .extract_title import load_env
-from .llm import BudgetedLLM, CallBudget, OpenAIClient
-from .paper_input import build_user, cached_routing, doi_candidates, load_meta, paper_chunk_indexes
-from .paper_prompt import SYSTEM_PROMPT, PaperOut
-from .routing_input import section_list
+from ..config import Config
+from ..extract_title import load_env
+from ..llm import BudgetedLLM, CallBudget, OpenAIClient
+from ..routing_call import cached_routing
+from ..routing_input import section_list
+from .inputs import build_user, doi_candidates, load_meta, paper_chunk_indexes
+from .prompt import SYSTEM_PROMPT, PaperOut
 
 
 def call_paper(user: str, cfg: Config, cache_dir: Path) -> tuple[PaperOut, dict]:
@@ -64,7 +65,7 @@ def show(out: PaperOut, ref_map: dict[str, dict]) -> None:
 
 
 def main() -> None:
-    root = Path(__file__).resolve().parent.parent
+    root = Path(__file__).resolve().parent.parent.parent
     parser = argparse.ArgumentParser(description="Paper 속성 추출을 1회 호출합니다(LLM 호출).")
     parser.add_argument("chunks_json", type=Path)
     args = parser.parse_args()
