@@ -15,5 +15,5 @@ outputs/
 outputs_backup_*/
 
 # 테스트 코드   
-paper_extractor/tests/
+tests/
 
