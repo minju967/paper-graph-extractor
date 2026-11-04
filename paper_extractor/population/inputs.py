@@ -11,13 +11,12 @@ import json
 from pathlib import Path
 
 from ..config import Config
-from ..evidence_refs import number_chunks
+from ..attrs import STUDY_TYPES
+from ..evidence_refs import build_typed_user
 from ..extract_title import load_env
 from ..routing_call import cached_routing
 from ..routing_input import section_list
 from ..routing_prompt import RoutingOut
-
-STUDY_TYPES = ["중재 연구", "관찰 연구", "문헌 종합 연구"]
 
 
 def population_chunk_indexes(route: RoutingOut, rows: list[dict], study_type: str) -> list[int]:
@@ -32,8 +31,7 @@ def population_chunk_indexes(route: RoutingOut, rows: list[dict], study_type: st
 
 def build_user(selected: list[dict], study_type: str) -> tuple[str, dict[str, dict]]:
     """Population 호출에 보낼 사용자 입력과 문장 번호 맵을 만든다. 첫 줄에 연구 유형을 적는다."""
-    body, ref_map = number_chunks(selected)
-    return f"Study type of this paper: {study_type}\n\n{body}", ref_map
+    return build_typed_user(selected, study_type)
 
 
 def main() -> None:

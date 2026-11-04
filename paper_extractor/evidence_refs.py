@@ -90,6 +90,12 @@ def number_chunks(selected: list[dict]) -> tuple[str, dict[str, dict]]:
     return "\n\n".join(parts), ref_map
 
 
+def build_typed_user(selected: list[dict], study_type: str) -> tuple[str, dict[str, dict]]:
+    """연구 유형을 첫 줄에 적고, 번호 붙은 청크를 이어 붙인 사용자 입력과 ref_map을 만든다."""
+    body, ref_map = number_chunks(selected)
+    return f"Study type of this paper: {study_type}\n\n{body}", ref_map
+
+
 def resolve(attr, ref_map: dict[str, dict]) -> tuple[list[dict], list[str]]:
     """근거 문장 번호를 원문 문장과 섹션 경로로 바꾼다. (근거 목록, 입력에 없는 번호 목록)을 돌려준다."""
     evidence, invalid = [], []

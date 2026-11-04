@@ -4,10 +4,10 @@
 현재 구현 범위는 아래와 같다.
 
 ```
-PDF → Markdown(+메타데이터) → 제목 계층(LLM) → 섹션 청크 → 라우팅(LLM 1회) → Paper 노드 속성(LLM 1회)
+PDF → Markdown(+메타데이터) → 제목 계층(LLM) → 섹션 청크 → 라우팅(LLM 1회) → Paper·Population·Program 노드 속성(노드마다 LLM 1회)
 ```
 
-`Population`, `Program`, `Outcome` 노드의 속성 추출과 관계 생성은 아직 없다. 설계와 확정 사항은 `docs/프로젝트_기획안.md`,
+`Outcome` 노드의 속성 추출과 관계 생성은 아직 없다. 설계와 확정 사항은 `docs/프로젝트_기획안.md`,
 추출 기준은 `docs/GraphRAG_추출기준_v0.5.md`에 있다(이 저장소 밖 `personal_AI/docs/`).
 
 ## 설치와 설정
@@ -37,6 +37,8 @@ LLM을 호출하는 단계는 표에 표시했다. LLM은 논문 한 편의 한 
 | 2. 라우팅(노드별 섹션 선택) | `.venv/bin/python -m paper_extractor.routing_call outputs/chunks/NN_chunks.json` | 1회 |
 | 3. Paper 입력 확인 | `.venv/bin/python -m paper_extractor.paper.inputs outputs/chunks/NN_chunks.json [--full]` | 없음 |
 | 4. Paper 속성 추출 | `.venv/bin/python -m paper_extractor.paper.call outputs/chunks/NN_chunks.json` | 1회 |
+| 5. Population 속성 추출 | `.venv/bin/python -m paper_extractor.population.call outputs/chunks/NN_chunks.json --study-type "중재 연구"` | 1회 |
+| 6. Program 속성 추출 | `.venv/bin/python -m paper_extractor.program.call outputs/chunks/NN_chunks.json --study-type "중재 연구" [--evidence] [--cache-only]` | 1회 |
 
 인자를 생략하면 PDF는 `paper_extractor/papers/`를 읽는다. 3·4단계는 2단계의 캐시된 라우팅 결과를 쓰며, 캐시가 없으면
 3단계는 호출하지 않고 멈춘다. 더 작은 단위의 명령도 있다.
@@ -51,7 +53,7 @@ LLM을 호출하는 단계는 표에 표시했다. LLM은 논문 한 편의 한 
 
 ## 코드 구성
 
-공통 코드는 `paper_extractor/`, 노드별 속성 추출 코드는 노드 이름의 하위 폴더에 둔다(`paper/` 구현, 나머지는 같은 모양으로 추가 예정).
+공통 코드는 `paper_extractor/`, 노드별 속성 추출 코드는 노드 이름의 하위 폴더(`paper/`, `population/`, `program/`)에 둔다. `Outcome`도 같은 모양(`prompt.py`, `inputs.py`, `call.py`)으로 추가할 예정이다.
 
 | 파일 | 하는 일 |
 |---|---|
@@ -61,9 +63,12 @@ LLM을 호출하는 단계는 표에 표시했다. LLM은 논문 한 편의 한 
 | `build_all.py` | 변환 → 제목 → 청크를 한 번에 돌리고 달라진 논문만 다시 처리 |
 | `routing_input.py`, `routing_prompt.py`, `routing_call.py` | 섹션 목록(ID·제목 경로·첫 문단 앞부분)을 LLM에 보내 노드마다 1순위·후보 섹션을 받는다. 캐시 전용 읽기(`cached_routing`) 포함 |
 | `evidence_refs.py` | 청크의 섹션 본문을 문장으로 나누고 `섹션ID.s번호`를 붙인다. LLM은 근거를 번호로만 답하고 코드가 원문 문장과 섹션 경로로 바꾼다 |
+| `attrs.py` | 노드 속성의 공통 형식 `{value, evidence, note}`와 연구 유형 목록 |
 | `paper/prompt.py` | Paper 시스템 프롬프트와 출력 스키마(속성 11개, 각 `{value, evidence, note}`) |
 | `paper/inputs.py` | 라우팅 결과로 보낼 청크 선택, 메타데이터 줄과 DOI 후보 합치기, 입력 조립 |
 | `paper/call.py` | LLM 호출, 단일 DOI 후보의 코드 채택, 근거 번호 → 원문 교체와 출력 |
+| `population/` | 집단 목록 추출. 연구 유형을 첫 줄에 알려 주고, 중재·관찰 연구는 `population` 1순위+후보 1순위 청크, 문헌 종합 연구는 `population`+`outcome` 1순위 청크를 보낸다 |
+| `program/` | 프로그램(조건) 목록과 활동 구성 추출. `program` 1순위 청크를 보낸다. 대조 조건도 Program, 준비·정리운동은 note, 문헌 종합 연구는 운동 종류×프로그램 출처로 나눈다 |
 | `llm.py`, `config.py` | OpenAI 호출·호출 한도·캐시, 설정 |
 | `pdf_to_md.py`, `chunking.py`, `models.py` | 옛 파이프라인에서 남은 보조 코드. 변환·청킹이 일부 함수만 쓴다 |
 
@@ -77,7 +82,8 @@ LLM을 호출하는 단계는 표에 표시했다. LLM은 논문 한 편의 한 
 - DOI 후보가 하나면 코드가 채택하고, 둘 이상이면 후보를 프롬프트에 붙여 LLM이 고르며, 없으면 비워 둔다.
 - 모집 연령은 숫자 최소·최대로 적고 원문 표현은 note에 남긴다(`40~50대` → 40/59).
 - 연구 유형: 중재 연구 / 관찰 연구 / 문헌 종합 연구. 연구자가 중재를 배정했는지 애매하면 중재 연구로 본다.
-- 정보 상태(보고됨·미보고 등)는 LLM이 아니라 코드가 정하며 아직 구현하지 않았다.
+- 정보 상태(보고됨·미보고 등)와 닫힌 값(활동 유형·프로그램 출처 등) 점검은 LLM이 아니라 코드가 맡으며 아직 구현하지 않았다.
+- `Population`, `Program`의 연구 유형은 아직 `Paper` 결과와 연결하지 않고 `--study-type`으로 받는다.
 
 ## 산출물 (`outputs/`, git 제외)
 

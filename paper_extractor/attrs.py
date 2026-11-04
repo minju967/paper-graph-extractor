@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from pydantic import BaseModel
 
+STUDY_TYPES = ["중재 연구", "관찰 연구", "문헌 종합 연구"]
+
 
 class TextAttr(BaseModel):
     value: str | None
