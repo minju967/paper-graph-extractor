@@ -20,6 +20,9 @@ class Config:
     max_output_tokens_merge: int = 16_000
     max_output_tokens_image: int = 8_000
     request_timeout_s: float = 180.0
+    # 시간 초과·일시적 오류가 나면 최대 이만큼 더 시도하고, 시간 초과 때마다 제한 시간에 timeout_growth를 곱한다.
+    timeout_retries: int = 2
+    timeout_growth: float = 1.5
 
     # --- 호출 예산 (계획서 6절: 논문당 15회 이내, 이미지 최대 5페이지) ---
     max_api_calls: int = 15
@@ -49,6 +52,10 @@ class Config:
         d = asdict(self)
         d["output_dir"] = str(self.output_dir)
         return d
+
+    def attempts_for(self, max_calls: int) -> int:
+        """계획한 호출 수 max_calls에 재시도 몫을 더한 호출 한도. 캐시 전용(0)이면 0이다."""
+        return max_calls + self.timeout_retries if max_calls > 0 else 0
 
     def cache_fingerprint(self) -> dict:
         """결과에 영향을 주는 설정만 캐시 키에 넣는다."""

@@ -23,14 +23,15 @@ from .prompt import SYSTEM_PROMPT, ProgramOut
 
 
 def call_program(user: str, cfg: Config, cache_dir: Path, max_calls: int = 1) -> tuple[ProgramOut, dict]:
-    llm = BudgetedLLM(OpenAIClient(cfg.model, cfg.request_timeout_s), CallBudget(max_calls), cache_dir, cfg.cache_fingerprint(), cfg.model)
+    llm = BudgetedLLM(OpenAIClient(cfg.model, cfg.request_timeout_s), CallBudget(cfg.attempts_for(max_calls)), cache_dir, cfg.cache_fingerprint(), cfg.model)
     out = llm.run(
         stage="program_attrs",
         system=SYSTEM_PROMPT,
         user=user,
         schema=ProgramOut,
         max_output_tokens=cfg.max_output_tokens_extract,
-        retries=0,
+        retries=cfg.timeout_retries,
+        timeout_growth=cfg.timeout_growth,
     )
     return out, llm.budget.totals()
 

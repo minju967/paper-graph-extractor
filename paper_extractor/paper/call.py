@@ -22,14 +22,15 @@ from .prompt import SYSTEM_PROMPT, PaperOut
 
 
 def call_paper(user: str, cfg: Config, cache_dir: Path) -> tuple[PaperOut, dict]:
-    llm = BudgetedLLM(OpenAIClient(cfg.model, cfg.request_timeout_s), CallBudget(1), cache_dir, cfg.cache_fingerprint(), cfg.model)
+    llm = BudgetedLLM(OpenAIClient(cfg.model, cfg.request_timeout_s), CallBudget(cfg.attempts_for(1)), cache_dir, cfg.cache_fingerprint(), cfg.model)
     out = llm.run(
         stage="paper_attrs",
         system=SYSTEM_PROMPT,
         user=user,
         schema=PaperOut,
         max_output_tokens=cfg.max_output_tokens_extract,
-        retries=0,
+        retries=cfg.timeout_retries,
+        timeout_growth=cfg.timeout_growth,
     )
     return out, llm.budget.totals()
 

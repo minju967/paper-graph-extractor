@@ -29,9 +29,10 @@ class BudgetExceeded(Exception):
 class LLMError(Exception):
     """불완전 출력·거절·API 오류. retryable이면 남은 예산 안에서 재시도할 수 있다."""
 
-    def __init__(self, message: str, retryable: bool = False):
+    def __init__(self, message: str, retryable: bool = False, timed_out: bool = False):
         super().__init__(message)
         self.retryable = retryable
+        self.timed_out = timed_out
 
 
 @dataclass
@@ -66,6 +67,7 @@ class LLMClient(Protocol):
         schema: type[T],
         max_output_tokens: int,
         images: list[bytes] | None = None,
+        timeout_scale: float = 1.0,
     ) -> tuple[T, Usage]: ...
 
 
@@ -83,19 +85,22 @@ class OpenAIClient:
 
         # max_retries=0: SDK의 숨은 자동 재시도로 호출 한도를 넘지 않도록 한다.
         self._client = OpenAI(max_retries=0, timeout=timeout_s)
+        self.timeout_s = timeout_s
         self.model = model
 
     def _redact(self, text: str) -> str:
         key = os.environ.get("OPENAI_API_KEY", "")
         return text.replace(key, "***") if key else text
 
-    def parse(self, *, stage, system, user, schema, max_output_tokens, images=None):
+    def parse(self, *, stage, system, user, schema, max_output_tokens, images=None, timeout_scale=1.0):
+        # 시간 초과 뒤 재시도할 때는 제한 시간을 늘려(기본 시간 x timeout_scale) 호출한다.
+        client = self._client if timeout_scale == 1.0 else self._client.with_options(timeout=self.timeout_s * timeout_scale)
         content: list[dict] = [{"type": "input_text", "text": user}]
         for img in images or []:
             b64 = base64.b64encode(img).decode("ascii")
             content.append({"type": "input_image", "image_url": f"data:image/png;base64,{b64}"})
         try:
-            resp = self._client.responses.parse(
+            resp = client.responses.parse(
                 model=self.model,
                 input=[
                     {"role": "system", "content": system},
@@ -107,7 +112,9 @@ class OpenAIClient:
         except Exception as e:  # noqa: BLE001 - SDK 예외 계층이 넓다
             name = type(e).__name__
             retryable = name in {"APIConnectionError", "APITimeoutError", "RateLimitError", "InternalServerError"}
-            raise LLMError(f"{name}: {self._redact(str(e))[:500]}", retryable=retryable) from None
+            raise LLMError(
+                f"{name}: {self._redact(str(e))[:500]}", retryable=retryable, timed_out=name == "APITimeoutError"
+            ) from None
 
         if getattr(resp, "status", "completed") != "completed":
             reason = getattr(getattr(resp, "incomplete_details", None), "reason", None)
@@ -184,11 +191,13 @@ class BudgetedLLM:
         images: list[bytes] | None = None,
         retries: int = 0,
         keep_free: int = 0,
+        timeout_growth: float = 1.0,
     ) -> T:
         """한 논리 호출을 실행한다.
 
         retries: 실패 후 추가 시도 횟수. 재시도는 남은 예산에서 keep_free(이후 단계 예약분)를
         뺀 뒤에도 여유가 있을 때만 수행한다. 첫 시도는 이미 계획에 포함된 호출이므로 예약분을 뺀 검사를 하지 않는다.
+        timeout_growth: 시간 초과로 실패한 뒤 재시도할 때마다 제한 시간에 곱하는 배수(1이면 늘리지 않는다).
         """
         img_hash = hashlib.sha256(b"".join(images or [])).hexdigest() if images else ""
         key = make_key(
@@ -211,12 +220,14 @@ class BudgetedLLM:
                 path.unlink(missing_ok=True)
 
         last_err: LLMError | None = None
+        timeout_scale = 1.0
         for attempt in range(retries + 1):
             if attempt > 0 and self.budget.remaining - keep_free < 1:
                 break
             self.budget.consume()  # 시도 전에 집계 → 예외가 나도 호출 수가 누락되지 않는다
             t0 = time.time()
             try:
+                extra = {"timeout_scale": timeout_scale} if timeout_scale != 1.0 else {}
                 parsed, usage = self.client.parse(
                     stage=stage,
                     system=system,
@@ -224,6 +235,7 @@ class BudgetedLLM:
                     schema=schema,
                     max_output_tokens=max_output_tokens,
                     images=images,
+                    **extra,
                 )
             except LLMError as e:
                 self.budget.records.append(
@@ -232,6 +244,8 @@ class BudgetedLLM:
                 last_err = e
                 if not e.retryable:
                     break
+                if e.timed_out:
+                    timeout_scale *= timeout_growth
                 continue
             self.budget.records.append(
                 UsageRecord(stage, attempt, self.model, "ok", **asdict(usage), elapsed_s=time.time() - t0)

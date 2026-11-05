@@ -21,15 +21,16 @@ from .inputs import STUDY_TYPES, build_user, population_chunk_indexes
 from .prompt import SYSTEM_PROMPT, PopulationOut
 
 
-def call_population(user: str, cfg: Config, cache_dir: Path) -> tuple[PopulationOut, dict]:
-    llm = BudgetedLLM(OpenAIClient(cfg.model, cfg.request_timeout_s), CallBudget(1), cache_dir, cfg.cache_fingerprint(), cfg.model)
+def call_population(user: str, cfg: Config, cache_dir: Path, max_calls: int = 1) -> tuple[PopulationOut, dict]:
+    llm = BudgetedLLM(OpenAIClient(cfg.model, cfg.request_timeout_s), CallBudget(cfg.attempts_for(max_calls)), cache_dir, cfg.cache_fingerprint(), cfg.model)
     out = llm.run(
         stage="population_attrs",
         system=SYSTEM_PROMPT,
         user=user,
         schema=PopulationOut,
         max_output_tokens=cfg.max_output_tokens_extract,
-        retries=0,
+        retries=cfg.timeout_retries,
+        timeout_growth=cfg.timeout_growth,
     )
     return out, llm.budget.totals()
 

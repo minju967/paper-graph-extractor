@@ -39,14 +39,15 @@ def cached_routing(rows: list[dict], cfg: Config, cache_dir: Path) -> RoutingOut
 
 def route(rows: list[dict], cfg: Config, cache_dir: Path) -> tuple[RoutingOut, dict]:
     """섹션 목록으로 라우팅을 1회 호출한다. (출력, 사용량 요약)을 돌려준다."""
-    llm = BudgetedLLM(OpenAIClient(cfg.model, cfg.request_timeout_s), CallBudget(1), cache_dir, cfg.cache_fingerprint(), cfg.model)
+    llm = BudgetedLLM(OpenAIClient(cfg.model, cfg.request_timeout_s), CallBudget(cfg.attempts_for(1)), cache_dir, cfg.cache_fingerprint(), cfg.model)
     out = llm.run(
         stage="routing",
         system=SYSTEM_PROMPT,
         user=format_list(rows),
         schema=RoutingOut,
         max_output_tokens=cfg.max_output_tokens_classify,
-        retries=0,
+        retries=cfg.timeout_retries,
+        timeout_growth=cfg.timeout_growth,
     )
     return out, llm.budget.totals()
 
