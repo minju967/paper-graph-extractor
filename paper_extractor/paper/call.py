@@ -45,7 +45,7 @@ def apply_single_doi(out: PaperOut, dois: list[str], ref_map: dict[str, dict]) -
 
 def show(out: PaperOut, ref_map: dict[str, dict]) -> None:
     for name, attr in out:
-        print(f"{name}: {attr.value!r}")
+        print(f"{name}: {attr.value!r}  [{attr.status}]")
         evidence, invalid = resolve(attr, ref_map)
         for ev in evidence:
             print(f"    근거 {ev['ref']} ({ev['section'][:40]}) {ev['quote']}")

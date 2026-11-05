@@ -43,7 +43,7 @@ def _show_attrs(item, ref_map: dict[str, dict], indent: str, full_evidence: bool
             continue
         evidence, invalid = resolve(attr, ref_map)
         refs = ", ".join([e["ref"] for e in evidence] + [f"{r}(입력에 없음)" for r in invalid]) or "없음"
-        print(f"{indent}{name}: {attr.value!r}  | 근거: {refs}" + (f"  | note: {attr.note}" if attr.note else ""))
+        print(f"{indent}{name}: {attr.value!r}  [{attr.status}] | 근거: {refs}" + (f"  | note: {attr.note}" if attr.note else ""))
         if full_evidence:
             for ev in evidence:
                 print(f"{indent}    {ev['ref']} ({ev['section'][:30]}) {ev['quote']}")

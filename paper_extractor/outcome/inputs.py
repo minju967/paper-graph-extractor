@@ -50,10 +50,9 @@ def node_lists(programs: ProgramOut, populations: PopulationOut) -> tuple[str, d
         )
     for k, g in enumerate(populations.populations, 1):
         gid = f"G{k}"
-        names[gid] = _v(g.group_name) if g.group_name.value else _v(g.condition)
-        pop_lines.append(
-            f"{gid} | group_name: {_v(g.group_name)} | condition: {_v(g.condition)} | group_role: {_v(g.group_role)}"
-        )
+        names[gid] = _v(g.group_name) if g.group_name.value else (g.condition.note or _v(g.condition))
+        condition = _v(g.condition) + (f" ({g.condition.note})" if g.condition.note else "")
+        pop_lines.append(f"{gid} | group_name: {_v(g.group_name)} | condition: {condition} | group_role: {_v(g.group_role)}")
     text = "Programs:\n" + ("\n".join(prog_lines) or "(none)") + "\n\nPopulations:\n" + ("\n".join(pop_lines) or "(none)")
     return text, names
 

@@ -12,7 +12,9 @@ from ..attrs import TextAttr
 
 INDICATOR_CATEGORIES = ["혈압", "혈당", "간수치", "비만", "기타"]
 COMPARISON_TYPES = ["집단 내 전후", "조건 간", "집단 간·상호작용", "통합 분석"]
-DIRECTIONS = ["감소", "동일", "증가"]
+DIRECTIONS = ["감소", "동일", "증가"]  # 코드가 정하는 최종 값
+CHANGE_DIRECTIONS = ["감소", "증가"]  # LLM이 답하는 변화 방향
+SIGNIFICANCES = ["유의", "비유의"]
 
 SYSTEM_PROMPT = """\
 You are given parts of ONE academic paper (text chunks), the Programs and Populations already extracted from it
@@ -25,7 +27,7 @@ How to form outcomes:
   splitting unit: write them in measurement_time. Different indicators are different outcomes (e.g. SBP and DBP).
 - The same result reported in the abstract, the text and a table is ONE outcome. If the text and a table disagree, keep
   the text's value and say so in note; do not correct either.
-- Report non-significant results too (direction "동일", see below).
+- Report non-significant results too (significance "비유의", see below).
 - Do not judge whether a result is an improvement; do not compute any new effect.
 - Do NOT create an Outcome that only compares participant subgroups with each other (e.g. "the effect was greatest in
   hypertensive participants", "no difference by sex or age", a test for a difference between subgroups). Extract each
@@ -36,7 +38,7 @@ Target program (only when a line "Target program: Pk (...)" follows the study ty
 - Extract ONLY the outcomes that evaluate that Program (its id is in program_ids). Ignore outcomes of the other Programs
   (they are extracted in separate calls). The other Programs may still appear in comparison_program_ids.
 - A result that compares two Programs directly is extracted ONLY in the call of its evaluated Program (the rule is
-  under "direction" below). If the target is not the evaluated Program of that result, skip it: another call extracts it.
+  under "change_direction" below). If the target is not the evaluated Program of that result, skip it: another call extracts it.
 - If no outcome of that Program is reported, return an empty list.
 
 Links to the already extracted nodes (use ONLY ids that appear in the lists; never invent ids):
@@ -54,34 +56,38 @@ General rules:
   brackets. Use only ids that appear in the input. Never write quotes. Use an empty list when the value is null.
 - note is for short remarks (original wording, ambiguity, conflicts). Use null if there is nothing to add.
 
-Attributes of each outcome (required: indicator, direction):
+Attributes of each outcome (required: indicator):
 - indicator: the health indicator that was evaluated, in the paper's wording (e.g. "수축기 혈압", "SBP").
 - indicator_category: exactly one of "혈압", "혈당", "간수치", "비만", "기타" (Korean strings, written exactly as listed);
   anything that is not blood pressure, blood glucose (including insulin resistance), liver enzymes or obesity/body
   composition is "기타".
-- direction: exactly one of "감소", "동일", "증가" (Korean strings, written exactly as listed), or null.
-  It says how the indicator of the evaluated Program (program_ids) turned out compared with what it is compared with
+- direction: ALWAYS null. The program computes it from change_direction and significance (and from confidence
+  intervals); never fill it yourself.
+- change_direction: exactly one of "감소", "증가" (Korean strings, written exactly as listed), or null. It says which way
+  the indicator of the evaluated Program (program_ids) went compared with what it is compared with
   (comparison_program_ids such as the control or another Program, or the baseline state):
-  - "감소": the indicator was lower / decreased (e.g. "significantly reduced", "larger reduction than ...").
-  - "증가": the indicator was higher / increased.
-  - "동일": the paper says there was NO significant difference or change. A small numeric change that the paper calls
-    not significant is still "동일"; describe the trend in note (e.g. "tended to be greater, not significant").
-    Significance decides, not the size or sign of the change: if the paper says the difference/change was not
-    significant (also in a clause such as "reductions were larger ..., although they were not significant" or
-    "significant only for SBP" -> DBP is not significant), the direction MUST be "동일", never "감소" or "증가".
-    Use "감소" / "증가" only when the paper reports the change or difference as significant (or states a significant
-    reduction/increase). Before answering, check that direction agrees with what you wrote in note.
-  - null: the paper does not say which way it went in words. This is REQUIRED when the sentence gives only numbers
-    (an estimate with a confidence interval, e.g. "-0.75 [-2.2 to 0.69]") or only "the effect was greatest in group X"
-    without a before/after or Program comparison direction. NEVER guess the direction from the sign of a number: the
-    program decides it from the confidence interval. Explain in note.
-  Do NOT put numbers or the paper's wording into direction; numbers belong in representative_values and
-  significance_statistics, the wording can be written in note.
+  - "감소": the paper says the indicator was lower / decreased / reduced more (e.g. "significantly reduced",
+    "larger reduction than ..."), even if the paper adds that it was not significant.
+  - "증가": the paper says the indicator was higher / increased.
+  - null: the paper says nothing about the direction in words. This is REQUIRED when the sentence gives only numbers
+    (an estimate with a confidence interval, e.g. "-0.75 [-2.2 to 0.69]"), when it says there was no change/difference
+    at all, or when it only says "the effect was greatest in group X". NEVER guess the direction from the sign of a
+    number: the program decides it from the confidence interval. Explain in note.
+- significance: exactly one of "유의", "비유의" (Korean strings, written exactly as listed), or null.
+  - "유의": the paper says the change/difference was significant (e.g. "significantly", "유의한 차이가 나타났다"), or
+    gives a p-value below the paper's significance level (0.05 if none is stated) for THIS result.
+  - "비유의": the paper says the change/difference was not significant or that there was no difference, also when this
+    is a clause of the sentence ("reductions were larger ..., although they were not significant", "significant only
+    for SBP" -> every other indicator is "비유의"), or gives a p-value at or above the level for THIS result.
+  - null: the paper gives no statement and no p-value for this result (only an estimate with a confidence interval
+    counts as no statement: the program decides it).
+  The wording stays in note, numbers belong in representative_values and significance_statistics, not here.
   Comparing two Programs directly: the evaluated Program (program_ids) is the Program that the sentence names as the
-  SUBJECT, i.e. the one reported to have done better / reduced more, and direction is relative to the compared Program
-  (e.g. "isometric training reduced SBP more than endurance training" -> program_ids = isometric, comparison_program_ids
-  = endurance, direction = "감소"). When the comparison is symmetric ("no differences among A, B and C"), direction is
-  "동일" and the evaluated Program is the one with the SMALLER number in each pair (A-B: A, A-C: A, B-C: B).
+  SUBJECT, i.e. the one reported to have done better / reduced more, and change_direction is relative to the compared
+  Program (e.g. "isometric training reduced SBP more than endurance training" -> program_ids = isometric,
+  comparison_program_ids = endurance, change_direction = "감소"). When the comparison is symmetric ("no differences among
+  A, B and C"), change_direction is null, significance is "비유의" and the evaluated Program is the one with the SMALLER
+  number in each pair (A-B: A, A-C: A, B-C: B).
 - significance_statistics: the p-value / confidence interval of THIS result, with the test or analysis it belongs to,
   as written. Use a p-value only when the sentence ties it to this result. A p-value that belongs to a different test
   (e.g. a test for the difference BETWEEN subgroups) must not be copied onto each subgroup's own result: use null and
@@ -110,6 +116,8 @@ class OutcomeItem(BaseModel):
     indicator: TextAttr
     indicator_category: TextAttr
     direction: TextAttr
+    change_direction: TextAttr
+    significance: TextAttr
     significance_statistics: TextAttr
     representative_values: TextAttr
     comparison_type: TextAttr

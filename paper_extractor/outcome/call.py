@@ -19,9 +19,18 @@ from ..extract_title import load_env
 from ..llm import BudgetedLLM, CallBudget, OpenAIClient
 from ..routing_call import cached_routing
 from ..routing_input import section_list
-from .direction import direction_mismatch, fill_direction
+from .direction import decide_direction, direction_mismatch
 from .inputs import build_user, cached_nodes, outcome_chunk_indexes, target_programs
-from .prompt import COMPARISON_TYPES, DIRECTIONS, INDICATOR_CATEGORIES, SYSTEM_PROMPT, OutcomeItem, OutcomeOut
+from .prompt import (
+    CHANGE_DIRECTIONS,
+    COMPARISON_TYPES,
+    DIRECTIONS,
+    INDICATOR_CATEGORIES,
+    SIGNIFICANCES,
+    SYSTEM_PROMPT,
+    OutcomeItem,
+    OutcomeOut,
+)
 
 # 결과가 많은 논문에서 출력(추론 토큰 포함)이 잘리지 않도록 Outcome 호출만 한도를 넓힌다.
 OUTCOME_MAX_OUTPUT_TOKENS = 16_000
@@ -55,6 +64,8 @@ def check_links(item: OutcomeItem, names: dict[str, str]) -> dict[str, list[str]
 
 CLOSED_VALUES = (
     ("direction", DIRECTIONS),
+    ("change_direction", CHANGE_DIRECTIONS),
+    ("significance", SIGNIFICANCES),
     ("indicator_category", INDICATOR_CATEGORIES),
     ("comparison_type", COMPARISON_TYPES),
 )
@@ -111,7 +122,7 @@ def show(out: OutcomeOut, ref_map: dict[str, dict], names: dict[str, str], full_
                 continue
             evidence, invalid = resolve(attr, ref_map)
             refs = ", ".join([e["ref"] for e in evidence] + [f"{r}(입력에 없음)" for r in invalid]) or "없음"
-            print(f"    {name}: {attr.value!r}  | 근거: {refs}" + (f"  | note: {attr.note}" if attr.note else ""))
+            print(f"    {name}: {attr.value!r}  [{attr.status}] | 근거: {refs}" + (f"  | note: {attr.note}" if attr.note else ""))
             if full_evidence:
                 for ev in evidence:
                     print(f"        {ev['ref']} ({ev['section'][:30]}) {ev['quote']}")
@@ -133,7 +144,7 @@ def show(out: OutcomeOut, ref_map: dict[str, dict], names: dict[str, str], full_
             print(f"  !! 닫힌 값 오류: {bad_values}")
         mismatch = direction_mismatch(item)
         if mismatch:
-            print(f"  !! 방향·신뢰구간 불일치: {mismatch}")
+            print(f"  !! 유의성·방향 불일치: {mismatch}")
 
 
 def main() -> None:
@@ -165,8 +176,8 @@ def main() -> None:
         print(f"[대상 {t or '전체'}] Outcome {len(out.outcomes)}개 | 사용량: {usage}")
         merged.extend(out.outcomes)
     merged, removed = dedupe_pairs(merged)
-    filled = sum(fill_direction(it) for it in merged)
-    print(f"\n신뢰구간으로 코드가 direction을 채운 결과: {filled}개")
+    filled = sum(decide_direction(it) for it in merged)
+    print(f"\n코드가 direction을 정한 결과: {filled}개")
     print(f"\n합친 뒤 중복 제거: {removed}개 제거 -> Outcome {len(merged)}개\n")
     show(OutcomeOut(outcomes=merged), ref_map, names, args.evidence)
 

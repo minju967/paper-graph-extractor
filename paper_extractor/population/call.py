@@ -18,7 +18,7 @@ from ..llm import BudgetedLLM, CallBudget, OpenAIClient
 from ..routing_call import cached_routing
 from ..routing_input import section_list
 from .inputs import STUDY_TYPES, build_user, population_chunk_indexes
-from .prompt import SYSTEM_PROMPT, PopulationOut
+from .prompt import CONDITION_CATEGORIES, GROUP_LEVELS, GROUP_ROLES, SYSTEM_PROMPT, PopulationOut
 
 
 def call_population(user: str, cfg: Config, cache_dir: Path, max_calls: int = 1) -> tuple[PopulationOut, dict]:
@@ -35,12 +35,18 @@ def call_population(user: str, cfg: Config, cache_dir: Path, max_calls: int = 1)
     return out, llm.budget.totals()
 
 
+def check_closed(pop) -> dict[str, str]:
+    """닫힌 목록이 있는 속성의 값이 목록을 어기는지 찾는다(값이 없는 것은 점검하지 않는다)."""
+    allowed = {"condition": CONDITION_CATEGORIES, "group_level": GROUP_LEVELS, "group_role": GROUP_ROLES}
+    return {f: getattr(pop, f).value for f, ok in allowed.items() if getattr(pop, f).value not in (None, *ok)}
+
+
 def show(out: PopulationOut, ref_map: dict[str, dict]) -> None:
     print(f"집단 수: {len(out.populations)}")
     for k, pop in enumerate(out.populations, 1):
         print(f"\n[집단 {k}]")
         for name, attr in pop:
-            print(f"{name}: {attr.value!r}")
+            print(f"{name}: {attr.value!r}  [{attr.status}]")
             evidence, invalid = resolve(attr, ref_map)
             for ev in evidence:
                 print(f"    근거 {ev['ref']} ({ev['section'][:40]}) {ev['quote']}")
@@ -48,6 +54,9 @@ def show(out: PopulationOut, ref_map: dict[str, dict]) -> None:
                 print(f"    근거 {ref} (입력에 없는 번호)")
             if attr.note:
                 print(f"    note: {attr.note}")
+        bad = check_closed(pop)
+        if bad:
+            print(f"  !! 닫힌 값 오류: {bad}")
 
 
 def main() -> None:

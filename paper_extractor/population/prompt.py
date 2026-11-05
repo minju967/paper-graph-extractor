@@ -8,7 +8,11 @@ from __future__ import annotations
 
 from pydantic import BaseModel
 
-from ..attrs import TextAttr
+from ..attrs import NumAttr, TextAttr
+
+CONDITION_CATEGORIES = ["혈압", "혈당", "간수치", "비만", "기타"]
+GROUP_LEVELS = ["개별 연구집단", "종합 분석 집단"]
+GROUP_ROLES = ["중재군", "대조군", "전체 분석 집단", "하위집단"]
 
 SYSTEM_PROMPT = """\
 You are given parts of ONE academic paper (text chunks). The first line of the input states the study type of the paper.
@@ -25,6 +29,10 @@ How to form groups:
   recommendations (e.g. "adults with hypertension"). Do NOT create a group for a category that is only mentioned in
   passing, for example inside a sentence describing a cited study. If there is one main subject population, create
   one group with group_role "전체 분석 집단"; use "하위집단" only for a category that is a part of another group.
+  If the paper reports results BOTH for the whole population that it analyzed (e.g. the pooled result of all included
+  studies, defined by the inclusion criteria) AND for categories of it (e.g. by blood pressure level), create BOTH:
+  one group for the whole population with group_role "전체 분석 집단" and one group per category with group_role
+  "하위집단". Never leave out the whole-population group when the paper reports an overall result for it.
   group_level is "종합 분석 집단". group_name is usually null; fill age and sex only if the paper itself reports them
   for that category.
 - Do not create a disease group just because blood pressure etc. was measured in healthy participants.
@@ -38,9 +46,19 @@ General rules:
 - note is for short remarks (original wording, ambiguity). Use null if there is nothing to add.
 
 Attributes of each group (required: condition):
-- condition: the disease, pre-disease stage or health state confirmed for this group. If there are several, join them
-  with "; " and say in note whether they are comorbid or subgroups.
-- age: as reported (mean ± SD, actual range or wording). Not the recruitment range.
+- condition: exactly one of "혈압", "혈당", "간수치", "비만", "기타" (Korean strings, written exactly as listed): the
+  category of the disease, pre-disease stage or health state confirmed for this group.
+  - "혈압": hypertension, pre-hypertension, high blood pressure. "혈당": diabetes, pre-diabetes, insulin resistance,
+    high blood glucose. "간수치": fatty liver, high liver enzymes. "비만": obesity, overweight, high body fat.
+  - "기타": any other disease, or healthy participants without a disease.
+  - If the group has several conditions (e.g. "pre-diabetes; pre-hypertension", "obesity; stage 1 hypertension"), choose
+    the one the study mainly targets (the first one listed when unclear) and write ALL the conditions exactly as the
+    paper words them in note, including whether they are comorbid or subgroups.
+  - Always write the paper's own wording of the condition in note (e.g. "고혈압 1기", "hypertensive patients").
+- age: a whole number, the mean age of the group in years. Drop the standard deviation and cut off the decimals
+  (do not round): "46.08±4.51세" -> 46, "63.78±9.83세" -> 63. Write the paper's original wording in note
+  (e.g. "46.08±4.51세"). If the paper gives no mean (only a range such as "40~50세" or an inclusion criterion), use null
+  and write the original wording in note. Not the recruitment range.
 - sex: the actual composition of the enrolled participants.
 - risk_group: the paper's own risk classification and its criteria. Do not map it to any other scheme.
 - group_name: the label used in the paper for this group (e.g. "EX", "운동군").
@@ -52,7 +70,7 @@ Attributes of each group (required: condition):
 
 class PopulationItem(BaseModel):
     condition: TextAttr
-    age: TextAttr
+    age: NumAttr
     sex: TextAttr
     risk_group: TextAttr
     group_name: TextAttr
