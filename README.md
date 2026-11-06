@@ -9,10 +9,10 @@
 현재 구현 범위는 아래와 같다.
 
 ```
-PDF → Markdown(+메타데이터) → 제목 계층(LLM) → 섹션 청크 → 라우팅(LLM 1회) → Paper·Population·Program 노드 속성(노드마다 LLM 1회) → Outcome 속성(Program마다 LLM 1회)
+PDF → Markdown(+메타데이터) → 제목 계층(LLM) → 섹션 청크 → 라우팅(LLM 1회) → Paper·Population·Program 노드 속성(노드마다 LLM 1회) → Outcome 속성(Program마다 LLM 1회) → 노드 연결 JSON(LLM 없음)
 ```
 
-노드 사이의 관계 생성, 검색, 속성 값 검증은 아직 없다. 설계와 확정 사항은 `docs/프로젝트_기획안.md`,
+검색과 속성 값 검증은 아직 없다. 노드 사이의 연결은 캐시된 추출 결과로 코드가 만든다("노드 연결" 절). 설계와 확정 사항은 `docs/프로젝트_기획안.md`,
 추출 기준은 `docs/GraphRAG_추출기준_v0.5.md`에 있다(이 저장소 밖 `personal_AI/docs/`).
 
 ## 설치와 설정
@@ -46,10 +46,11 @@ LLM을 호출하는 단계는 표에 표시했다. LLM은 논문 한 편의 한 
 | 6. Program 속성 추출 | `.venv/bin/python -m paper_extractor.program.call outputs/chunks/NN_chunks.json --study-type "중재 연구" [--evidence] [--cache-only]` | 1회 |
 | 7. Outcome 입력 확인 | `.venv/bin/python -m paper_extractor.outcome.inputs outputs/chunks/NN_chunks.json --study-type "중재 연구" [--full]` | 없음 |
 | 8. Outcome 속성 추출 | `.venv/bin/python -m paper_extractor.outcome.call outputs/chunks/NN_chunks.json --study-type "중재 연구" --split [--evidence] [--cache-only]` | 대조가 아닌 Program 수만큼 |
+| 9. 노드 연결 JSON | `.venv/bin/python -m paper_extractor.graph.build outputs/chunks/NN_chunks.json [--out 경로]` | 없음 |
 
 인자를 생략하면 PDF는 `paper_extractor/papers/`를 읽는다. 3·4단계는 2단계의 캐시된 라우팅 결과를 쓰며, 캐시가 없으면
 3단계는 호출하지 않고 멈춘다. Outcome(7·8단계)은 같은 논문의 Population·Program 결과를 캐시에서만 읽으므로 5·6단계를 먼저 실행해야
-하고, 캐시에 없으면 호출하지 않고 멈춘다. LLM 호출이 시간 초과 등으로 실패하면 제한 시간을 1.5배씩 늘려 최대 2회 더 시도한다(`config.py`). 더 작은 단위의 명령도 있다.
+하고, 캐시에 없으면 호출하지 않고 멈춘다. 9단계는 Paper·Population·Program·Outcome 결과를 모두 캐시에서만 읽으며 없으면 멈춘다. LLM 호출이 시간 초과 등으로 실패하면 제한 시간을 1.5배씩 늘려 최대 2회 더 시도한다(`config.py`). 더 작은 단위의 명령도 있다.
 
 ```bash
 .venv/bin/python -m paper_extractor.convert_pdf_md [PDF 파일 또는 폴더]          # PDF → Markdown, 메타데이터
@@ -78,6 +79,7 @@ LLM을 호출하는 단계는 표에 표시했다. LLM은 논문 한 편의 한 
 | `population/` | 집단 목록 추출(질병은 4개 분류로 정규화, 연령은 정수). 연구 유형을 첫 줄에 알려 주고, 중재·관찰 연구는 `population` 1순위+후보 1순위 청크, 문헌 종합 연구는 `population`+`outcome` 1순위 청크를 보낸다 |
 | `program/` | 프로그램(조건) 목록과 활동 구성 추출. `program` 1순위 청크를 보낸다. 대조 조건도 Program, 준비·정리운동은 note, 문헌 종합 연구는 운동 종류×프로그램 출처로 나눈다 |
 | `outcome/` | 결과 목록 추출. `outcome` 1순위 청크와 앞서 추출한 Program(P1…)·Population(G1…) 목록을 보내고, LLM이 결과마다 연결 번호를 답한다. `--split`이면 대조가 아닌 Program마다 1회씩 호출해 합치며(`direction.py`는 신뢰구간 판정, `call.py`는 중복 제거) 출력은 모든 속성을 값이 없는 것까지 보여 준다 |
+| `graph/build.py` | 캐시된 Paper·Program·Population·Outcome 결과로 `nodes`·`edges`·`warnings`가 든 논문별 JSON을 만든다. 연구 유형에 따라 보고 계열·시행 계열 관계를 만들고 Program → Population `APPLIED_TO`를 Outcome에서 유도한다 |
 | `llm.py`, `config.py` | OpenAI 호출·호출 한도·캐시·시간 초과 재시도, 설정 |
 | `pdf_to_md.py`, `chunking.py`, `models.py` | 옛 파이프라인에서 남은 보조 코드. 변환·청킹이 일부 함수만 쓴다 |
 
@@ -115,22 +117,37 @@ LLM을 호출하는 단계는 표에 표시했다. LLM은 논문 한 편의 한 
 `significance`, `significance_statistics`, `representative_values`, `comparison_type`, `measurement_time`(각 `{value, evidence, note}`)과
 연결 `program_ids`, `population_ids`, `comparison_program_ids`, `link_evidence`, `link_note`이다.
 
-- 닫힌 값: `indicator_category` = 혈압 / 혈당 / 간수치 / 비만 / 기타, `direction` = 감소 / 동일 / 증가, `change_direction` = 감소 / 증가,
+- 닫힌 값: `indicator_category` = 혈압 / 혈당 / 간수치 / 비만 / 기타, `direction` = 감소 / 차이 없음 / 증가, `change_direction` = 감소 / 증가,
   `significance` = 유의 / 비유의, `comparison_type` = 집단 내 전후 / 통합 분석 / 조건 간 / 집단 간·상호작용. 목록을 어기면 출력에 오류로 표시한다.
-- **`direction`은 LLM이 아니라 코드가 정한다.** LLM은 변화 방향(`change_direction`)과 유의성(`significance`)만 답한다. 유의성이 `비유의`이면 `동일`, `유의`이면 변화 방향을 쓴다.
-  유의성이 비어 있고 신뢰구간이 하나 있으면 구간으로 판정한다(전체 음수 감소, 전체 양수 증가, 0을 지나면 동일). 유의성을 말하지 않고 변화 방향만 있으면 `direction`은 null이다.
+- **`direction`은 LLM이 아니라 코드가 정한다.** LLM은 변화 방향(`change_direction`)과 유의성(`significance`)만 답한다. 유의성이 `비유의`이면 `차이 없음`, `유의`이면 변화 방향을 쓴다.
+  유의성이 비어 있고 신뢰구간이 하나 있으면 구간으로 판정한다(전체 음수 감소, 전체 양수 증가, 0을 지나면 차이 없음). 유의성을 말하지 않고 변화 방향만 있으면 `direction`은 null이다.
   신뢰구간·p값(0.05 기준)이 LLM이 답한 유의성·방향과 어긋나면 값을 바꾸지 않고 출력에 `!!`로 표시한다.
-- `동일`은 논문이 "유의한 차이 없음"이라고 한 경우다. 프로그램끼리 직접 비교한 결과는 문장의 주어(더 낫다고 보고된 쪽)가 평가 Program이고, 대칭 비교는 번호가 작은 Program이 평가 Program이다.
+- `차이 없음`은 논문이 "유의한 차이 없음"이라고 한 경우다. 프로그램끼리 직접 비교한 결과는 문장의 주어(더 낫다고 보고된 쪽)가 평가 Program이고, 대칭 비교는 번호가 작은 Program이 평가 Program이다.
 - 비교 방식 판단 순서: 한 조건·한 집단의 전후 → `집단 내 전후` / 문헌 종합 연구의 Program 하나 대 대조(하위집단별 포함) → `통합 분석` / 두 Program 직접 비교 → `조건 간` / 서로 다른 조건을 받은 집단끼리 → `집단 간·상호작용`.
 - 하위집단끼리만 비교한 결과는 Outcome으로 만들지 않고 각 하위집단의 효과를 따로 만든다. 본문과 수치가 반대이면 본문 값을 쓰고 note에 적는다. 지표 표기는 원문 그대로 둔다(`DDBP`도 그대로).
 - 대조군과 비교한 합산 효과 등 통계는 그 결과 자체의 검정값만 쓴다. 하위집단 간 차이 검정의 p값을 각 하위집단 결과에 복사하지 않는다. `note`는 한국어로 쓴다.
 - 연결 번호는 입력 목록에 있는 것만 인정하고, Program은 `P`, 집단은 `G`로 시작해야 한다. 호출은 대조가 아닌 Program마다 1회이고, 합칠 때 같은 비교 쌍의 중복을 코드로 제거한다.
 
+### 노드 연결
+
+`graph.build`가 논문 한 편을 `outputs/graph/<번호>.json`(`nodes`, `edges`, `warnings`)으로 묶는다. 노드 번호는 `paper`, `P1…`, `G1…`, `O1…`이고, 모든 속성은 값·정보 상태·근거 원문(`ref`, `section`, `quote`)·메모를 가진다.
+연결은 LLM이 아니라 코드가 이미 추출된 번호에서 만든다. 관계 이름은 기획안의 확정 이름이다.
+
+| 계열 | 연구 유형 | 관계 |
+|---|---|---|
+| 공통 | 모두 | `Paper → HAS_PROGRAM → Program`, `Paper → HAS_POPULATION → Population`, `Outcome → COMPARED_WITH_PROGRAM → Program`, `Program → APPLIED_TO → Population`(Outcome에서 유도, 출처 "유도됨") |
+| 보고 계열 | 관찰 연구, 문헌 종합 연구 | `Paper → REPORTS → Outcome`, `Outcome → EVALUATES_PROGRAM → Program`, `Outcome → ANALYZES_POPULATION → Population` |
+| 시행 계열 | 중재 연구 | `Program → HAS_OUTCOME → Outcome`, `Outcome → MEASURED_IN → Population` |
+
+- 연결마다 출처(코드 / 추출됨 / 유도됨), 근거 문장, 메모를 가진다. `Population → PARTICIPATES_IN → Program`은 만들지 않는다.
+- Outcome이 없는 Program은 Population과 연결하지 않고 `warnings`로 알린다. 대조 Program과 `대조군` Population은 `APPLIED_TO`로 연결하지 않으며, 대조군 Population은 Outcome에 연결되지 않아도 경고하지 않는다.
+- 그 밖의 점검(경고만 하고 값은 바꾸지 않음): 목록에 없는 연결 번호, 평가 대상이 비거나 대조 Program인 Outcome, 자기 자신과의 비교, 어떤 Outcome에도 쓰이지 않은 Population.
+
 ### 검색 용도 (설계, 아직 구현 안 함)
 
 입력은 질병, 성별, 연령(40대, 50대 같은 범위)이고 결과는 추천할 프로그램이다. 대상(Population)에서 시작해 Outcome을 거쳐 Program을 찾는다.
 
-- Program–Population을 따로 저장하지 않는다. Outcome의 `population_ids`와 `program_ids`가 이어 준다.
+- Program → Population 연결(`APPLIED_TO`)은 Outcome의 `program_ids × population_ids`에서 코드가 유도해 저장한다("노드 연결" 절). 이 연결로 질병이 맞는 Population에 연결된 Program을 바로 찾는다.
 - 성별이나 연령이 `미보고`인 Population도 후보에 넣고 순위를 낮춘다. Population의 `age`(정수)가 입력 연령 범위 안에 들어오면 후보로 뽑는다.
 - 질병은 Population의 `condition`과 Outcome의 `indicator_category`로 맞추고, 개선 결과(`direction`이 `감소`)를 고른다. 순위는 비교 방식으로 가늠한다.
   이 경로와 후보 조건은 논의 중이며 기획안 v1.41에 `[검토 중]`으로 있다.
@@ -143,6 +160,7 @@ LLM을 호출하는 단계는 표에 표시했다. LLM은 논문 한 편의 한 
 | `titles/<번호>_title.json`, `.outline.md` | 제목 계층과 섹션별 본문 |
 | `chunks/<번호>_chunks.json`, `.md`, `<번호>_figures/` | 청크(섹션 ID·경로 포함)와 잘라 낸 그림·표 이미지 |
 | `cache/` | 완료된 LLM 호출 결과. 입력·프롬프트가 같으면 재사용 |
+| `graph/<번호>.json` | 논문별 노드·연결 JSON |
 
 파일 이름은 긴 한글 파일명이 OS 길이 제한을 넘지 않도록 `<논문 번호>`를 쓴다. 원본 이름은 JSON의 `source`에 있다.
 
@@ -153,8 +171,9 @@ LLM을 호출하는 단계는 표에 표시했다. LLM은 논문 한 편의 한 
 - PDF 변환에서 생긴 띄어쓰기 오류(`최 근`, `30 대`)는 속성값에도 그대로 남는다(원문 표현 유지 규칙).
 - 문장 분리는 규칙 기반이라 약어·표에서 경계가 어긋날 수 있다.
 - 실제 LLM 결과를 확인한 논문은 `papers/`의 6편(01, 02, 04, 05, 06, 07번)이다. 그 밖의 논문 정확도는 확인하지 않았다.
-- Outcome 시험 결과: 07번 26개, 01번 12개, 02번 14개, 04번 8개, 05번 16개, 06번 7개. `direction`은 83개 중 59개에서 정해지고 나머지는 null이다(집단×시기 상호작용, 교차 설계의 조건 간,
-  유의성을 말하지 않은 서술형 리뷰). 06번(서술형 리뷰)은 Program 6개 중 4개에서 Outcome이 없어 누락 가능성이 있으나 확인하지 않았다.
-- 07번 Population 재호출에서 전체 대상 집단이 빠진 적이 있다(프롬프트 보강 후 재확인 전). 질병이 여럿인 집단은 하나로 줄어 note에만 남는다. 연령은 평균 나이 하나뿐이다.
+- Outcome 시험 결과: 07번 26개, 01번 12개, 02번 13개, 04번 8개, 05번 16개, 06번 7개. `direction`은 일부가 null이다(집단×시기 상호작용, 교차 설계의 조건 간,
+  유의성을 말하지 않은 서술형 리뷰). 04·05·06번은 Population 프롬프트를 바꾼 뒤 다시 호출하지 않아 연결 JSON은 07·01·02번만 만들었다. 06번(서술형 리뷰)은 Program 6개 중 4개에서 Outcome이 없어 누락 가능성이 있으나 확인하지 않았다.
+- 07번 Population 재호출에서 전체 대상 집단이 빠진 적이 있다(프롬프트 보강 후 1회 재호출에서는 포함됨). 질병이 여럿인 집단은 하나로 줄어 note에만 남는다. 연령은 평균 나이 하나뿐이다.
+- 평행 설계에서 대조군 Population은 어떤 Outcome에도 연결되지 않는다(비교 집단 번호를 답하게 하는 방안은 기획안 v1.53에서 정함, 아직 구현 안 함).
 - 표본 수와 연구 설계 같은 근거의 강도는 속성으로 두지 않았다. 문헌 종합 연구는 성별·연령이 없다.
-- 상세한 결정 이력과 미결 사항은 `docs/프로젝트_기획안.md`의 변경 이력(v1.29~v1.42)에 있다.
+- 상세한 결정 이력과 미결 사항은 `docs/프로젝트_기획안.md`의 변경 이력(v1.29~v1.53)에 있다.

@@ -12,7 +12,7 @@ from ..attrs import TextAttr
 
 INDICATOR_CATEGORIES = ["혈압", "혈당", "간수치", "비만", "기타"]
 COMPARISON_TYPES = ["집단 내 전후", "조건 간", "집단 간·상호작용", "통합 분석"]
-DIRECTIONS = ["감소", "동일", "증가"]  # 코드가 정하는 최종 값
+DIRECTIONS = ["감소", "차이 없음", "증가"]  # 코드가 정하는 최종 값
 CHANGE_DIRECTIONS = ["감소", "증가"]  # LLM이 답하는 변화 방향
 SIGNIFICANCES = ["유의", "비유의"]
 

@@ -1,9 +1,9 @@
-"""Outcome의 direction(감소/동일/증가)을 코드가 정한다. LLM을 호출하지 않는다(v1.37).
+"""Outcome의 direction(감소/차이 없음/증가)을 코드가 정한다. LLM을 호출하지 않는다(v1.37).
 
 LLM은 변화 방향(change_direction: 감소/증가/null)과 유의성(significance: 유의/비유의/null)만 답하고, direction은 비운다.
-  1. 유의성이 비유의 -> 동일
+  1. 유의성이 비유의 -> 차이 없음
   2. 유의성이 유의 -> 변화 방향(감소/증가). 변화 방향이 없으면 3번으로
-  3. 신뢰구간이 정확히 하나 있으면 구간 전체가 0보다 작으면 감소, 크면 증가, 0을 지나면 동일(v1.33)
+  3. 신뢰구간이 정확히 하나 있으면 구간 전체가 0보다 작으면 감소, 크면 증가, 0을 지나면 차이 없음(v1.33)
   4. 아니면 null
 안전장치로 신뢰구간(구간 기준 유의성)과 p값(0.05 기준)이 LLM이 답한 유의성·판정 결과와 어긋나면 값을 바꾸지 않고 알려 준다.
 """
@@ -44,7 +44,7 @@ def direction_from_ci(lo: float, hi: float) -> str:
         return "감소"
     if lo > 0:
         return "증가"
-    return "동일"
+    return "차이 없음"
 
 
 def significance_from_p(item: OutcomeItem) -> str | None:
@@ -78,7 +78,7 @@ def decide_direction(item: OutcomeItem) -> bool:
     """direction을 코드로 정해 채운다. 정했으면 True, 정하지 못해 null로 두면 False."""
     sig, change = item.significance.value, item.change_direction.value
     if sig == "비유의":
-        value, basis = "동일", "논문이 유의하지 않다고 보고하여 코드가 동일로 판정함."
+        value, basis = "차이 없음", "논문이 유의하지 않다고 보고하여 코드가 차이 없음으로 판정함."
     elif sig == "유의" and change in ("감소", "증가"):
         value, basis = change, f"논문이 유의한 {change}로 보고하여 코드가 판정함."
     else:

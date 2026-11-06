@@ -21,8 +21,9 @@ from .inputs import build_user, doi_candidates, load_meta, paper_chunk_indexes
 from .prompt import SYSTEM_PROMPT, PaperOut
 
 
-def call_paper(user: str, cfg: Config, cache_dir: Path) -> tuple[PaperOut, dict]:
-    llm = BudgetedLLM(OpenAIClient(cfg.model, cfg.request_timeout_s), CallBudget(cfg.attempts_for(1)), cache_dir, cfg.cache_fingerprint(), cfg.model)
+def call_paper(user: str, cfg: Config, cache_dir: Path, max_calls: int = 1) -> tuple[PaperOut, dict]:
+    """max_calls=0이면 캐시에 있는 결과만 읽는다(없으면 BudgetExceeded)."""
+    llm = BudgetedLLM(OpenAIClient(cfg.model, cfg.request_timeout_s), CallBudget(cfg.attempts_for(max_calls)), cache_dir, cfg.cache_fingerprint(), cfg.model)
     out = llm.run(
         stage="paper_attrs",
         system=SYSTEM_PROMPT,

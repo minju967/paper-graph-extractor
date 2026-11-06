@@ -147,6 +147,22 @@ def show(out: OutcomeOut, ref_map: dict[str, dict], names: dict[str, str], full_
             print(f"  !! 유의성·방향 불일치: {mismatch}")
 
 
+def collect_outcomes(selected, study_type, programs, populations, targets, cfg: Config, cache_dir: Path, budget: int, log=print):
+    """대상 Program마다 호출(또는 캐시 읽기)해 합치고, 중복을 제거한 뒤 코드가 direction을 정한다.
+
+    돌려주는 값: (Outcome 목록, 중복으로 제거한 수, direction을 정한 수). budget=0이면 캐시만 읽는다.
+    """
+    merged: list[OutcomeItem] = []
+    for t in targets:
+        user, _, _ = build_user(selected, study_type, programs, populations, t)
+        out, usage = call_outcome(user, cfg, cache_dir, budget)
+        log(f"[대상 {t or '전체'}] Outcome {len(out.outcomes)}개 | 사용량: {usage}")
+        merged.extend(out.outcomes)
+    merged, removed = dedupe_pairs(merged)
+    filled = sum(decide_direction(it) for it in merged)
+    return merged, removed, filled
+
+
 def main() -> None:
     root = Path(__file__).resolve().parent.parent.parent
     parser = argparse.ArgumentParser(description="Outcome 속성 추출을 1회 호출합니다(LLM 호출).")
@@ -168,15 +184,8 @@ def main() -> None:
     idx = outcome_chunk_indexes(route, rows)
     selected = [c for c in data["chunks"] if c["index"] in idx]
     targets = target_programs(programs) if args.split else [args.target]
-    budget = 0 if args.cache_only else 1
-    merged: list[OutcomeItem] = []
-    for t in targets:
-        user, ref_map, names = build_user(selected, args.study_type, programs, populations, t)
-        out, usage = call_outcome(user, cfg, cache_dir, budget)
-        print(f"[대상 {t or '전체'}] Outcome {len(out.outcomes)}개 | 사용량: {usage}")
-        merged.extend(out.outcomes)
-    merged, removed = dedupe_pairs(merged)
-    filled = sum(decide_direction(it) for it in merged)
+    merged, removed, filled = collect_outcomes(selected, args.study_type, programs, populations, targets, cfg, cache_dir, 0 if args.cache_only else 1)
+    _, ref_map, names = build_user(selected, args.study_type, programs, populations)
     print(f"\n코드가 direction을 정한 결과: {filled}개")
     print(f"\n합친 뒤 중복 제거: {removed}개 제거 -> Outcome {len(merged)}개\n")
     show(OutcomeOut(outcomes=merged), ref_map, names, args.evidence)
